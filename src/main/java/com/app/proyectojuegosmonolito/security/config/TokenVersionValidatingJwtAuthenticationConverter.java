@@ -24,6 +24,12 @@ public class TokenVersionValidatingJwtAuthenticationConverter implements Convert
 
     @Override
     public AbstractAuthenticationToken convert(Jwt jwt) {
+        // Solo los tokens de acceso pueden autenticar requests. Sin este chequeo,
+        // el token de onboarding (type=onboarding) seria aceptado por el resource
+        // server y dependeria de que su subject no sea numerico para fallar.
+        if (!"access".equals(jwt.getClaimAsString("type"))) {
+            throw new BadCredentialsException("Not an access token");
+        }
         Long userId;
         try {
             userId = Long.parseLong(jwt.getSubject());

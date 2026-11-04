@@ -79,10 +79,24 @@ class TokenVersionValidatingJwtAuthenticationConverterTest {
                 .hasMessage("Invalid token subject");
     }
 
+    @Test
+    void convert_withOnboardingToken_shouldThrow() {
+        var jwt = Jwt.withTokenValue("token")
+                .header("alg", "HS256")
+                .subject("google:123")
+                .claim("type", "onboarding")
+                .build();
+
+        assertThatThrownBy(() -> converter.convert(jwt))
+                .isInstanceOf(BadCredentialsException.class)
+                .hasMessage("Not an access token");
+    }
+
     private Jwt token(Long subject, int ver) {
         return Jwt.withTokenValue("token")
                 .header("alg", "HS256")
                 .subject(subject.toString())
+                .claim("type", "access")
                 .claim("ver", ver)
                 .build();
     }
@@ -91,6 +105,7 @@ class TokenVersionValidatingJwtAuthenticationConverterTest {
         return Jwt.withTokenValue("token")
                 .header("alg", "HS256")
                 .subject(subject)
+                .claim("type", "access")
                 .claim("ver", ver)
                 .build();
     }
@@ -99,6 +114,7 @@ class TokenVersionValidatingJwtAuthenticationConverterTest {
         return Jwt.withTokenValue("token")
                 .header("alg", "HS256")
                 .subject(subject.toString())
+                .claim("type", "access")
                 .build();
     }
 }

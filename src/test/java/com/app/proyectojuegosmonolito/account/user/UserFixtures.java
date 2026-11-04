@@ -56,6 +56,32 @@ public class UserFixtures {
                 .build();
     }
 
+    /**
+     * Variante sin repositorios para tests unitarios (Mockito) y para tests de
+     * integracion: region y comuna se referencian como entidades detached con id
+     * 1, que es el par que siembra {@code src/test/resources/test-data.sql}
+     * (Metropolitana de Santiago / Santiago). No se persisten por cascade, solo
+     * aportan la FK.
+     */
+    public static Profile profile(User user) {
+        var region = detachRegion();
+        return baseProfile(user)
+                .region(region)
+                .comuna(detachComuna(region))
+                .visibility(Visibility.PUBLIC)
+                .build();
+    }
+
+    public static Profile profile(User user, String nickname, Visibility visibility) {
+        var region = detachRegion();
+        return baseProfile(user)
+                .nickname(nickname)
+                .region(region)
+                .comuna(detachComuna(region))
+                .visibility(visibility)
+                .build();
+    }
+
     public static Profile profile(User user, RegionRepository regionRepository, ComunaRepository comunaRepository) {
         var region = regionRepository.findByNombre("Metropolitana de Santiago").orElseThrow();
         var comuna = comunaRepository.findByNombreAndRegion_Id("Santiago", region.getId()).orElseThrow();
@@ -99,6 +125,26 @@ public class UserFixtures {
                 .balance(balance)
                 .updatedAt(Instant.now())
                 .build();
+    }
+
+    private static Profile.ProfileBuilder baseProfile(User user) {
+        return Profile.builder()
+                .userId(user.getId())
+                .user(user)
+                .nickname(user.getEmail())
+                .run(generateUniqueRun())
+                .firstName("Test")
+                .lastName("User")
+                .address("Calle Test 123")
+                .createdAt(Instant.now());
+    }
+
+    private static Region detachRegion() {
+        return Region.builder().id(1L).nombre("Metropolitana de Santiago").build();
+    }
+
+    private static Comuna detachComuna(Region region) {
+        return Comuna.builder().id(1L).nombre("Santiago").region(region).build();
     }
 
     private static String generateUniqueRun() {

@@ -1,6 +1,9 @@
 package com.app.proyectojuegosmonolito.security.mapper;
 
+import com.app.proyectojuegosmonolito.security.dto.GoogleCompleteRequest;
 import com.app.proyectojuegosmonolito.security.dto.RegisterRequest;
+import com.app.proyectojuegosmonolito.account.user.model.GoogleIdentity;
+import com.app.proyectojuegosmonolito.account.user.model.GoogleSignup;
 import com.app.proyectojuegosmonolito.account.user.model.User;
 import com.app.proyectojuegosmonolito.account.profile.model.Comuna;
 import com.app.proyectojuegosmonolito.account.profile.model.Profile;
@@ -43,5 +46,20 @@ public class AuthMapper {
                 .visibility(Visibility.PUBLIC)
                 .createdAt(Instant.now())
                 .build();
+    }
+
+    /**
+     * Combina la identidad ya verificada por Google con lo que el usuario
+     * completo en el formulario de onboarding.
+     */
+    public GoogleSignup toGoogleSignup(GoogleIdentity identity, GoogleCompleteRequest request) {
+        return new GoogleSignup(
+                identity,
+                request.run(),
+                request.nickname(),
+                request.birthDate(),
+                request.comunaId(),
+                request.address()
+        );
     }
 }

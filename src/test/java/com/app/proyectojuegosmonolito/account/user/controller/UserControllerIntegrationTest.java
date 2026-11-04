@@ -1,8 +1,6 @@
 package com.app.proyectojuegosmonolito.account.user.controller;
 
 import com.app.proyectojuegosmonolito.TestcontainersConfiguration;
-import com.app.proyectojuegosmonolito.account.profile.model.Comuna;
-import com.app.proyectojuegosmonolito.account.profile.model.Region;
 import com.app.proyectojuegosmonolito.account.user.dto.UserRequestCreate;
 import com.app.proyectojuegosmonolito.account.user.dto.UserUpdateRequest;
 import com.app.proyectojuegosmonolito.account.user.repository.UserRepository;
@@ -73,7 +71,7 @@ class UserControllerIntegrationTest {
                         .content(objectMapper.writeValueAsString(
                                 new UserRequestCreate("new@gmail.com", "pass123", "Nuevo", "Usuario",
                                         "190110222", LocalDate.of(2000, 1, 1),
-                                        Region.METROPOLITANA_DE_SANTIAGO, Comuna.SANTIAGO, "Av. Siempre Viva 123"))))
+                                        1L, "Av. Siempre Viva 123"))))
                 .andExpect(status().isCreated())
                 .andExpect(jsonPath("$.id").isNumber())
                 .andExpect(jsonPath("$.email").value("new@gmail.com"));
@@ -85,7 +83,7 @@ class UserControllerIntegrationTest {
                         .contentType(MediaType.APPLICATION_JSON)
                         .content(objectMapper.writeValueAsString(new UserRequestCreate(null, null, "Nuevo", "Usuario",
                                 "190110222", LocalDate.of(2000, 1, 1),
-                                Region.METROPOLITANA_DE_SANTIAGO, Comuna.SANTIAGO, "Av. Siempre Viva 123"))))
+                                1L, "Av. Siempre Viva 123"))))
                 .andExpect(status().isBadRequest())
                 .andExpect(jsonPath("$.title").value("Validation Error"))
                 .andExpect(jsonPath("$.errors.length()").value(3));

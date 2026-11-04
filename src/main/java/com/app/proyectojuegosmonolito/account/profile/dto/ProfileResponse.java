@@ -7,6 +7,7 @@ import java.time.LocalDate;
 public record ProfileResponse(
         Long userId,
         String nickname,
+        String avatarImage,
         String bio,
         Visibility visibility,
         String run,

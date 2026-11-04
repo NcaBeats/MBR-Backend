@@ -51,19 +51,36 @@ public class LoginAttemptLimiter {
     public long retryAfterSeconds(String email, String ip) {
         long now = System.currentTimeMillis();
         long emailWait = secondsUntilUnblocked(byEmail.get(key(email)), now);
-        long ipWait = secondsUntilUnblocked(byIp.get(ip), now);
+        long ipWait = secondsUntilUnblocked(byIp.get(key(ip)), now);
         return Math.max(emailWait, ipWait);
+    }
+
+    /**
+     * Variante para flujos donde no hay email antes de validar un token de
+     * terceros (Google): solo se limita por IP.
+     */
+    public long retryAfterSecondsForIp(String ip) {
+        return secondsUntilUnblocked(byIp.get(key(ip)), System.currentTimeMillis());
     }
 
     public void onFailure(String email, String ip) {
         long now = System.currentTimeMillis();
         byEmail.compute(key(email), (k, current) -> advance(current, now, maxPerEmail));
-        byIp.compute(ip == null ? "" : ip, (k, current) -> advance(current, now, maxPerIp));
+        byIp.compute(key(ip), (k, current) -> advance(current, now, maxPerIp));
+    }
+
+    public void onFailureForIp(String ip) {
+        long now = System.currentTimeMillis();
+        byIp.compute(key(ip), (k, current) -> advance(current, now, maxPerIp));
     }
 
     public void onSuccess(String email, String ip) {
         byEmail.remove(key(email));
-        byIp.remove(ip == null ? "" : ip);
+        byIp.remove(key(ip));
+    }
+
+    public void onSuccessForIp(String ip) {
+        byIp.remove(key(ip));
     }
 
     private Window advance(Window current, long now, int max) {

@@ -2,15 +2,23 @@ package com.app.proyectojuegosmonolito.account.user.mapper;
 
 import com.app.proyectojuegosmonolito.account.profile.model.Profile;
 import com.app.proyectojuegosmonolito.account.profile.model.Visibility;
+import com.app.proyectojuegosmonolito.account.profile.repository.ComunaRepository;
 import com.app.proyectojuegosmonolito.account.user.model.User;
 import com.app.proyectojuegosmonolito.account.user.dto.UserRequestCreate;
 import com.app.proyectojuegosmonolito.account.user.dto.UserResponse;
+import jakarta.persistence.EntityNotFoundException;
 import org.springframework.stereotype.Component;
 
 import java.time.Instant;
 
 @Component
 public class UserMapper {
+
+    private final ComunaRepository comunaRepository;
+
+    public UserMapper(ComunaRepository comunaRepository) {
+        this.comunaRepository = comunaRepository;
+    }
 
     public User toEntityCreate(UserRequestCreate request) {
         return User.builder()
@@ -19,7 +27,14 @@ public class UserMapper {
                 .build();
     }
 
+    /**
+     * La region se deriva de la comuna, igual que en el registro publico: el
+     * cliente solo manda {@code comunaId}, asi no puede guardar una combinacion
+     * region/comuna invalida.
+     */
     public Profile toProfileCreate(UserRequestCreate request, User user) {
+        var comuna = comunaRepository.findById(request.comunaId())
+                .orElseThrow(() -> new EntityNotFoundException("Comuna not found: " + request.comunaId()));
         return Profile.builder()
                 .user(user)
                 .nickname(user.getEmail())
@@ -27,8 +42,8 @@ public class UserMapper {
                 .firstName(request.firstName())
                 .lastName(request.lastName())
                 .birthDate(request.birthDate())
-                .region(request.region())
-                .comuna(request.comuna())
+                .region(comuna.getRegion())
+                .comuna(comuna)
                 .address(request.address())
                 .visibility(Visibility.PUBLIC)
                 .createdAt(Instant.now())

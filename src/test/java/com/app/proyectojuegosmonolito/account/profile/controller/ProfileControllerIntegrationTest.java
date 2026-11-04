@@ -56,7 +56,7 @@ class ProfileControllerIntegrationTest {
         mockMvc.perform(patch("/api/v1/profile").with(token)
                         .contentType(MediaType.APPLICATION_JSON)
                         .content(objectMapper.writeValueAsString(
-                                new ProfilePatchRequest(null, "new_nick", "My bio", Visibility.PRIVATE, null, null, null, null, null, null))))
+                                new ProfilePatchRequest(null, "new_nick", "My bio", Visibility.PRIVATE, null, null, null, null, null))))
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.nickname").value("new_nick"))
                 .andExpect(jsonPath("$.visibility").value("PRIVATE"));
@@ -69,7 +69,7 @@ class ProfileControllerIntegrationTest {
 
         mockMvc.perform(patch("/api/v1/profile").with(token)
                         .contentType(MediaType.APPLICATION_JSON)
-                        .content(objectMapper.writeValueAsString(new ProfilePatchRequest(null, null, null, null, null, null, null, null, null, null))))
+                        .content(objectMapper.writeValueAsString(new ProfilePatchRequest(null, null, null, null, null, null, null, null, null))))
                 .andExpect(status().isOk());
     }
 
@@ -82,7 +82,7 @@ class ProfileControllerIntegrationTest {
         mockMvc.perform(patch("/api/v1/profile").with(token)
                         .contentType(MediaType.APPLICATION_JSON)
                         .content(objectMapper.writeValueAsString(
-                                new ProfilePatchRequest(null, tooLongNickname, null, null, null, null, null, null, null, null))))
+                                new ProfilePatchRequest(null, tooLongNickname, null, null, null, null, null, null, null))))
                 .andExpect(status().isBadRequest())
                 .andExpect(jsonPath("$.title").value("Validation Error"))
                 .andExpect(jsonPath("$.errors[0]").value(containsString("nickname")));

@@ -1,7 +1,12 @@
 package com.app.proyectojuegosmonolito.security.controller;
 
 import com.app.proyectojuegosmonolito.SecurityContext;
+import com.app.proyectojuegosmonolito.exception.InvalidGoogleTokenException;
+import com.app.proyectojuegosmonolito.exception.InvalidOnboardingTokenException;
 import com.app.proyectojuegosmonolito.security.dto.AuthResponse;
+import com.app.proyectojuegosmonolito.security.dto.GoogleAuthRequest;
+import com.app.proyectojuegosmonolito.security.dto.GoogleAuthResponse;
+import com.app.proyectojuegosmonolito.security.dto.GoogleCompleteRequest;
 import com.app.proyectojuegosmonolito.security.dto.LoginRequest;
 import com.app.proyectojuegosmonolito.security.dto.RegisterRequest;
 import com.app.proyectojuegosmonolito.security.service.AuthService;
@@ -43,6 +48,56 @@ public class AuthController {
             return ResponseEntity.ok(response);
         } catch (BadCredentialsException e) {
             loginAttemptLimiter.onFailure(request.email(), ip);
+            throw e;
+        }
+    }
+
+    /**
+     * Login con Google Identity Services. Recibe el ID token que entrega el boton
+     * de Google y devuelve un access token propio o el token de onboarding.
+     */
+    @PostMapping("/google")
+    public ResponseEntity<GoogleAuthResponse> loginWithGoogle(@Valid @RequestBody GoogleAuthRequest request,
+                                                              HttpServletRequest httpRequest) {
+        String ip = clientIp(httpRequest);
+        long retryAfter = loginAttemptLimiter.retryAfterSecondsForIp(ip);
+        if (retryAfter > 0) {
+            return ResponseEntity.status(HttpStatus.TOO_MANY_REQUESTS)
+                    .header(HttpHeaders.RETRY_AFTER, Long.toString(retryAfter))
+                    .build();
+        }
+        try {
+            var response = authService.loginWithGoogle(request.idToken());
+            loginAttemptLimiter.onSuccessForIp(ip);
+            return ResponseEntity.ok(response);
+        } catch (InvalidGoogleTokenException e) {
+            // Un token de Google invalido si es un fallo a limitar; un dominio no
+            // permitido es una identidad valida, no fuerza bruta.
+            loginAttemptLimiter.onFailureForIp(ip);
+            throw e;
+        }
+    }
+
+    /**
+     * Segundo paso del registro con Google: completa RUN/region/comuna y recien
+     * ahi se crea la cuenta.
+     */
+    @PostMapping("/google/complete")
+    public ResponseEntity<AuthResponse> completeGoogleSignup(@Valid @RequestBody GoogleCompleteRequest request,
+                                                             HttpServletRequest httpRequest) {
+        String ip = clientIp(httpRequest);
+        long retryAfter = loginAttemptLimiter.retryAfterSecondsForIp(ip);
+        if (retryAfter > 0) {
+            return ResponseEntity.status(HttpStatus.TOO_MANY_REQUESTS)
+                    .header(HttpHeaders.RETRY_AFTER, Long.toString(retryAfter))
+                    .build();
+        }
+        try {
+            var response = authService.completeGoogleSignup(request);
+            loginAttemptLimiter.onSuccessForIp(ip);
+            return ResponseEntity.status(HttpStatus.CREATED).body(response);
+        } catch (InvalidOnboardingTokenException e) {
+            loginAttemptLimiter.onFailureForIp(ip);
             throw e;
         }
     }

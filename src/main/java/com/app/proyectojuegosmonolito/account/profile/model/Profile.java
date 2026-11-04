@@ -29,6 +29,9 @@ public class Profile {
     @Column(nullable = false, unique = true)
     private String nickname;
 
+    @Column(name = "avatar_image", columnDefinition = "TEXT")
+    private String avatarImage;
+
     @Column(columnDefinition = "TEXT")
     private String bio;
 
