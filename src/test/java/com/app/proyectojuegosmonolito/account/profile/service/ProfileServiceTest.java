@@ -30,7 +30,7 @@ class ProfileServiceTest {
     void findByUserId_whenFound_shouldReturnProfile() {
         var user = user(1L);
         var profile = profile(user);
-        when(profileRepository.findById(1L)).thenReturn(Optional.of(profile));
+        when(profileRepository.findByIdWithRegionAndComuna(1L)).thenReturn(Optional.of(profile));
 
         var result = profileService.findByUserId(1L);
 
@@ -39,7 +39,7 @@ class ProfileServiceTest {
 
     @Test
     void findByUserId_whenNotFound_shouldThrow() {
-        when(profileRepository.findById(99L)).thenReturn(Optional.empty());
+        when(profileRepository.findByIdWithRegionAndComuna(99L)).thenReturn(Optional.empty());
 
         assertThatThrownBy(() -> profileService.findByUserId(99L))
                 .isInstanceOf(EntityNotFoundException.class)
@@ -50,10 +50,10 @@ class ProfileServiceTest {
     void update_shouldModifyAndSave() {
         var user = user(1L);
         var profile = profile(user, "old", Visibility.PUBLIC);
-        when(profileRepository.findById(1L)).thenReturn(Optional.of(profile));
+        when(profileRepository.findByIdWithRegionAndComuna(1L)).thenReturn(Optional.of(profile));
         when(profileRepository.save(any())).thenAnswer(i -> i.getArgument(0));
 
-        var result = profileService.update(1L, new ProfilePatchRequest(null, "newnick", "new bio", Visibility.PRIVATE, null, null, null, null, null, null));
+        var result = profileService.update(1L, new ProfilePatchRequest(null, "newnick", "new bio", Visibility.PRIVATE, null, null, null, null, null));
 
         assertThat(result.getNickname()).isEqualTo("newnick");
         assertThat(result.getBio()).isEqualTo("new bio");

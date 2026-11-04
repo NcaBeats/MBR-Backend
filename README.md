@@ -16,10 +16,15 @@ Backend Spring Boot de una tienda de videojuegos con arquitectura modular (Sprin
 git clone <url-del-repositorio>
 cd Proyecto-Juegos-Monolito
 
-# 2. Levantar todo (Postgres + App)
+# 2. Crear el .env (compose.yaml lo usa como env_file y exige la password de la DB)
+cp .env.example .env
+# editar .env: SPRING_DATASOURCE_USERNAME, SPRING_DATASOURCE_PASSWORD y APP_JWT_SECRET
+# GOOGLE_CLIENT_ID es opcional acá (ver "Google Sign-In")
+
+# 3. Levantar todo (Postgres + App)
 docker compose up -d
 
-# 3. Ver logs
+# 4. Ver logs
 docker compose logs -f app
 ```
 
@@ -80,7 +85,7 @@ Los nombres son **los mismos** en local y en producción; lo que cambia es el va
 indica quién es el dueño: `SPRING_*` el framework, `APP_*` la aplicación, y sin prefijo un
 proveedor externo.
 
-### Desarrollo local — `.env` (11 variables)
+### Desarrollo local — `.env` (12 variables)
 
 | Variable | Para qué |
 |----------|----------|
@@ -89,6 +94,7 @@ proveedor externo.
 | `SPRING_DATASOURCE_PASSWORD` | Contraseña de Postgres |
 | `APP_JWT_SECRET` | Clave de firma de los JWT (HS256, mínimo 256 bits) |
 | `APP_JWT_EXPIRATION` | Vigencia del token en ms (default `3600000`) |
+| `GOOGLE_CLIENT_ID` | Client ID público del OAuth Client de Google (validación del claim `aud`). **Opcional en local**: sin él la app arranca y `/auth/google` responde 503 |
 | `R2_ACCOUNT_ID` | Cuenta de Cloudflare R2 (trailers) |
 | `R2_ACCESS_KEY_ID` | Access Key de R2 |
 | `R2_SECRET_ACCESS_KEY` | Secret Key de R2 |
@@ -115,12 +121,13 @@ APP_CORS_ALLOWED_ORIGINS=http://localhost:3000,http://127.0.0.1:3000,http://192.
 
 **Importante:** cambia `APP_CORS_ALLOWED_ORIGINS` requiere **restart** del backend (se lee al arrancar). Si ves error `CORS` / `Access-Control-Allow-Origin` en consola del navegador, falta el origin exacto que muestra el error — cópialo tal cual a la lista.
 
-### Producción — panel de Render (13 variables)
+### Producción — panel de Render (14 variables)
 
 El panel de Render **es** el almacén de secretos: los valores de producción no van en ningún
-archivo del repo. De las 11 de `.env`, solo 2 conservan el mismo valor
-(`APP_JWT_EXPIRATION` y `R2_BUCKET`); 8 lo cambian seguro, y una no
-(`R2_ACCOUNT_ID`) depende de si la rotación de keys fue dentro de la misma cuenta.
+archivo del repo. De las 12 de `.env`, solo 2 conservan el mismo valor
+(`APP_JWT_EXPIRATION` y `R2_BUCKET`); el resto cambia o depende del entorno
+(`GOOGLE_CLIENT_ID` es público y puede ser el mismo client si registrás el dominio de prod
+como origen autorizado, y `R2_ACCOUNT_ID` solo cambia si la rotación de keys fue a otra cuenta).
 
 | Variable | De dónde sale el valor |
 |----------|----------------------|
@@ -130,6 +137,7 @@ archivo del repo. De las 11 de `.env`, solo 2 conservan el mismo valor
 | `SPRING_DATASOURCE_PASSWORD` | Panel de la DB. **No reutilizar la de local** |
 | `APP_JWT_SECRET` | Generado por vos. **No reutilizar la de local** |
 | `APP_JWT_EXPIRATION` | `3600000` |
+| `GOOGLE_CLIENT_ID` | Google Cloud Console. Público; puede ser el mismo client con el dominio de prod como origen autorizado |
 | `APP_CORS_ALLOWED_ORIGINS` | Literal: el dominio de Vercel |
 | `APP_SEED_ENABLED` | `true` siembra catálogo y admin de arranque; `false` deja la DB vacía |
 | `R2_ACCOUNT_ID` | Dashboard de Cloudflare. Igual salvo que la rotación fuera a otra cuenta |
@@ -363,7 +371,30 @@ Cada juego incluye una **descripción detallada** y **especificaciones de PC** (
 ### Auth
 - `POST /api/v1/auth/login` — Iniciar sesión
 - `POST /api/v1/auth/register` — Registrar usuario
+- `POST /api/v1/auth/google` — Login/registro con Google. Recibe `{ "idToken": "<credential>" }`; responde `AUTHENTICATED` (cuenta existente) u `ONBOARDING_REQUIRED` (cuenta nueva + `onboardingToken` de 10 min)
+- `POST /api/v1/auth/google/complete` — Completa RUN/región/comuna del alta con Google y recién ahí crea la cuenta
 - `POST /api/v1/auth/logout` — Cerrar sesión
+
+#### Google Sign-In (ID token)
+
+El frontend usa Google Identity Services y manda el **ID token** a `POST /api/v1/auth/google`; el
+backend valida firma (JWKS de Google), `iss`, `aud`, `exp` y `email_verified`. No hay sesiones,
+cookies, `redirect_uri` ni client secret.
+
+1. Cuenta existente (por `sub` de Google o por email verificado) → `200 { status: "AUTHENTICATED", token, expiresIn }`.
+2. Cuenta nueva → `200 { status: "ONBOARDING_REQUIRED", onboardingToken, suggestedProfile }`. **No se crea nada en la BD todavía**.
+3. El front muestra el formulario (RUN, nickname, región/comuna, dirección) y llama
+   `POST /api/v1/auth/google/complete` con el `onboardingToken` → `201 { token, expiresIn }`.
+
+Configuración en Google Cloud Console: crear un **OAuth Client ID** de tipo *Web application* y
+agregar a *Authorized JavaScript origins* `http://localhost:3000`, `http://127.0.0.1:3000` y el
+dominio de producción (sin barra final). No hace falta redirect URI. El Client ID va en
+`GOOGLE_CLIENT_ID` (backend) y en la variable pública del frontend, y **ambos deben tener el
+mismo valor por entorno**.
+
+Si `GOOGLE_CLIENT_ID` está vacío (el caso por defecto en local), la app arranca normalmente y
+solo `POST /api/v1/auth/google` responde `503` con `code: GOOGLE_SIGN_IN_NOT_CONFIGURED`.
+En producción la variable es obligatoria: el arranque falla si falta.
 
 ### Games
 - `GET /api/v1/games` — Listar juegos (paginado). Filtros opcionales y combinables: `?category=<nombre>`, `?minPrice=<número>`, `?maxPrice=<número>`, `?state=AVAILABLE|COMING_SOON|DISCONTINUED`, `?name=<texto>`. El filtrado por precio usa el **precio vigente** (post-descuento), no el original. Orden con `?sort=<prop>,<asc|desc>` (`price` = precio efectivo post-descuento, `name`, `originalPrice`, `discountPercent`, `createdAt`, `launchDate`, `state`, `id`); sin `sort`, `createdAt DESC`
@@ -483,7 +514,7 @@ curl -X POST http://localhost:9090/api/v1/auth/login \
 | `ADMIN` | CRUD completo en juegos, usuarios, wallet, ver contactos, **blogs (CRUD + presign + cover)**, asignar sellers, seed |
 | `VENDEDOR` | Solo lectura de juegos, categorías y compras |
 | `CLIENTE` | Tienda, compras, perfil propio, enviar contacto |
-| (Sin auth) | Login, registro, enviar contacto, ver juegos, ver categorías, **ver blog (`GET /blogs`, `GET /blogs/{id}`, `?q=`), ver regiones/comunas (`GET /regions`, `GET /regions/{id}/comunas`), filtrar juegos por `?state=`** |
+| (Sin auth) | Login (incluido Google), registro, enviar contacto, ver juegos, ver categorías, **ver blog (`GET /blogs`, `GET /blogs/{id}`, `?q=`), ver regiones/comunas (`GET /regions`, `GET /regions/{id}/comunas`), filtrar juegos por `?state=`** |
 
 ## Health check
 

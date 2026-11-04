@@ -71,7 +71,7 @@ class LibraryServiceTest {
         var pageable = PageRequest.of(0, 10);
         var libs = List.of(Library.builder().id(1L).build());
         var page = new PageImpl<>(libs, pageable, 1);
-        when(libraryRepository.findByUser_Id(1L, pageable)).thenReturn(page);
+        when(libraryRepository.findByUser_IdOrderByAcquiredAtDesc(1L, pageable)).thenReturn(page);
 
         var result = libraryService.findByUserId(1L, pageable);
 

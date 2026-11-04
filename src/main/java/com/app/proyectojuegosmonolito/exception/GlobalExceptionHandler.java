@@ -89,6 +89,43 @@ public class GlobalExceptionHandler {
         return problem;
     }
 
+    @ExceptionHandler(InvalidGoogleTokenException.class)
+    public ProblemDetail handleInvalidGoogleToken(InvalidGoogleTokenException ex) {
+        log.warn("Invalid Google ID token: {}", sanitize(ex.getMessage()));
+        var problem = ProblemDetail.forStatusAndDetail(HttpStatus.UNAUTHORIZED, "Invalid Google credentials.");
+        problem.setTitle("Unauthorized");
+        return problem;
+    }
+
+    @ExceptionHandler(InvalidOnboardingTokenException.class)
+    public ProblemDetail handleInvalidOnboardingToken(InvalidOnboardingTokenException ex) {
+        log.warn("Invalid onboarding token: {}", sanitize(ex.getMessage()));
+        var problem = ProblemDetail.forStatusAndDetail(HttpStatus.UNAUTHORIZED,
+                "Invalid or expired onboarding token.");
+        problem.setTitle("Unauthorized");
+        return problem;
+    }
+
+    @ExceptionHandler(EmailDomainNotAllowedException.class)
+    public ProblemDetail handleEmailDomainNotAllowed(EmailDomainNotAllowedException ex) {
+        log.warn("Rejected OAuth signup from a non-allowed email domain");
+        var problem = ProblemDetail.forStatusAndDetail(HttpStatus.FORBIDDEN,
+                "Email domain not allowed.");
+        problem.setTitle("Forbidden");
+        problem.setProperty("code", BusinessException.EMAIL_DOMAIN_NOT_ALLOWED);
+        return problem;
+    }
+
+    @ExceptionHandler(GoogleSignInNotConfiguredException.class)
+    public ProblemDetail handleGoogleSignInNotConfigured(GoogleSignInNotConfiguredException ex) {
+        log.warn("Google sign-in endpoint called without app.oauth.google.client-id");
+        var problem = ProblemDetail.forStatusAndDetail(HttpStatus.SERVICE_UNAVAILABLE,
+                "Google sign-in is not configured on this server.");
+        problem.setTitle("Service Unavailable");
+        problem.setProperty("code", BusinessException.GOOGLE_SIGN_IN_NOT_CONFIGURED);
+        return problem;
+    }
+
     @ExceptionHandler(HttpMessageNotReadableException.class)
     public ProblemDetail handleUnreadable(HttpMessageNotReadableException ex) {
         log.warn("Malformed request body: {}", ex.getMessage());

@@ -47,7 +47,7 @@ class ProfileServiceIntegrationTest {
     void update_shouldModifyAndSave() {
         var user = userService.create(user(), profile(user()));
 
-        var result = profileService.update(user.getId(), new ProfilePatchRequest(null, "newnick", "new bio", Visibility.PRIVATE, null, null, null, null, null, null));
+        var result = profileService.update(user.getId(), new ProfilePatchRequest(null, "newnick", "new bio", Visibility.PRIVATE, null, null, null, null, null));
 
         assertThat(result.getNickname()).isEqualTo("newnick");
         assertThat(result.getBio()).isEqualTo("new bio");

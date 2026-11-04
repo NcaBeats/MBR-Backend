@@ -64,6 +64,18 @@ anyRequest                        → authenticated (any role)
 - `TokenVersionValidatingJwtAuthenticationConverter` (wraps the role converter) compares `ver` vs cached version on every authenticated request: in-memory lookup only (no DB). On cache-miss it loads the version from DB once and caches; missing `ver` claim / unknown user → treated as version 0 (preserves prior stateless contract). Mismatch → `BadCredentialsException` → 401.
 - **Single-instance only**: the cache is in-JVM. Render / Railway run 1 replica → OK. If scaled to N replicas, swap `TokenVersionCache` for Redis (version is already in DB; the swap is localized).
 
+### Google Sign-In (ID token + onboarding)
+- **Flujo**: el frontend usa Google Identity Services y manda el `idToken` a `POST /api/v1/auth/google`. El backend lo valida **en local** con `GoogleIdTokenVerifier`: firma contra `https://www.googleapis.com/oauth2/v3/certs` (Nimbus cachea el JWKS, sin red por request), `iss` (`https://accounts.google.com` o `accounts.google.com`), `aud` = `GOOGLE_CLIENT_ID`, `exp` y `email_verified=true`. **No hay sesiones, cookies, `redirect_uri` ni client secret.**
+- **Cuenta existente** → `200 {status:"AUTHENTICATED", token, expiresIn}`. Se busca primero por `(provider, provider_user_id)` = `sub` (el email puede cambiar) y, si no hay vínculo, por email verificado; en ese caso se crea la fila en `oauth_identity` (auto-link).
+- **Cuenta nueva** → `200 {status:"ONBOARDING_REQUIRED", onboardingToken, suggestedProfile}`. **No se crea nada en la BD**: el onboarding token (HS256 nuestro, `type=onboarding`, `sub=google:<sub>`, TTL `app.oauth.onboarding.ttl-ms` = 10 min) viaja al formulario y `POST /api/v1/auth/google/complete` crea `User` + `Profile` + `Wallet` + `OAuthIdentity` en una transacción. Sin esto, el `Profile` (RUN/región/comuna/dirección NOT NULL) no se puede armar con lo que entrega Google.
+- **El onboarding token no autentica requests**: el `TokenVersionValidatingJwtAuthenticationConverter` exige `type=access`. (Los access tokens ya llevaban ese claim; ahora se valida.)
+- **Password nullable**: una cuenta Google tiene `password NULL`; `UserDetailsServiceImpl` la rechaza con `UsernameNotFoundException` (→ 401), nunca con un 500. `updatePassword` sigue exigiendo la password actual, así que un usuario OAuth no puede fijar una (follow-up).
+- **Avatar**: el claim `picture` se guarda en `profile.avatar_image` al crear la cuenta y se refresca en cada login (`UserService.updateOAuthAvatar`). El header lo lee de `GET /profile` (campo `avatarImage`) y, si no hay foto, muestra un ícono genérico.
+- **Dominio**: al **crear** cuenta se exige `EmailDomainValidator.isAllowed(email)` (`duoc.cl`, `profesor.duoc.cl`, `gmail.com`). Una cuenta existente con otro dominio puede seguir logueándose con Google.
+- **Soft delete**: una cuenta borrada conserva el email (UNIQUE), así que el login con Google la rechaza con 401 en vez de fallar al insertar.
+- **Rate limit**: `/auth/google` y `/auth/google/complete` usan `LoginAttemptLimiter.retryAfterSecondsForIp` / `onFailureForIp` (solo IP, porque el email recién se conoce tras validar el token). Un dominio no permitido **no** cuenta como fallo.
+- **Migración**: `V1.1.0__oauth_google.sql` (`oauth_identity` + `password` nullable). `GOOGLE_CLIENT_ID` es **opcional en dev** (vacío: la app arranca y `/auth/google` responde 503 `GOOGLE_SIGN_IN_NOT_CONFIGURED`) y **obligatoria en prod** (sin default: el deploy falla al arrancar). En `test` hay un client id ficticio.
+
 ### Security hardening (OWASP Top 10 audit — 2026-08)
 Implemented:
 - **H1** POST `/api/v1/users` → ADMIN only (was permitAll — anyone could create an admin-role user)
@@ -98,10 +110,10 @@ Known debt (explicitly deferred, not urgent):
 - Dev: `.env` (gitignored) holds `SPRING_DATASOURCE_URL`/`_USERNAME`/`_PASSWORD` — the SAME three names that prod uses, so there is no translation table. Two ways they're read: `application-dev.yaml` imports `.env` via `spring.config.import` (host-run), and `compose.yaml` injects them with `env_file` (Docker). Compose interpolates them to build the Postgres container's `POSTGRES_USER`/`POSTGRES_PASSWORD`, then overrides `SPRING_DATASOURCE_URL` with the `postgres:` host, because inside the container network the host is the service name, not localhost.
 - `compose.yaml`: Postgres only, host port 5432, volume `postgres-data`
 - Prod DB runs on Render/Railway only. The Render dashboard IS the secrets store: 13 vars typed there, no file in the repo (a local `.env.prod` would be a second source that silently desyncs). Full list in README > Variables de entorno.
-- Tables: `user` (has `role varchar(10)` + `token_version integer`), `profile`, `wallet` (has `version bigint` for optimistic locking), `game`, `library`, `purchase` (has `idempotency_key` + `UNIQUE (user_id, idempotency_key)`), `purchase_item`
-- **Migrations**: ALL schema lives in a single file `V1.0.0__init_schema.sql` (wallet `version` and user `token_version` are columns inside the CREATE TABLEs). If an existing dev DB already applied an older split (`V1.1.0`), Flyway's checksum will fail → reset with `docker compose down -v`
+- Tables: `user` (has `role varchar(10)` + `token_version integer` + `password` **nullable** for Google-only accounts), `profile`, `wallet` (has `version bigint` for optimistic locking), `game`, `library`, `purchase` (has `idempotency_key` + `UNIQUE (user_id, idempotency_key)`), `purchase_item`, `oauth_identity` (`UNIQUE (provider, provider_user_id)` + `UNIQUE (user_id, provider)`)
+- **Migrations**: `V1.0.0__init_schema.sql` holds the original schema and `V1.1.0__oauth_google.sql` adds `oauth_identity` + makes `user.password` nullable. From here on, **prod is already migrated**: never edit an applied file (Flyway checksum → app won't boot); add `V1.2.0__...`, `V1.3.0__...`, etc. For local, `docker compose down -v` gives a clean replay of all versions.
 
-## ⚠️ CRITICAL: Reset DB + image when changing `V1.0.0__init_schema.sql` or Java code
+## ⚠️ CRITICAL: Reset DB + image when changing a migration or Java code
 
 **Symptom** (what you see when this rule is broken):
 - `GET http://localhost:9090/api/v1/games` (a `permitAll()` endpoint) returns **401** with header `WWW-Authenticate: Bearer resource_metadata="http://127.0.0.1:9090/.well-known/oauth-protected-resource"` — but `curl /api/v1/categories` and `curl /actuator/health` also fail
@@ -109,7 +121,7 @@ Known debt (explicitly deferred, not urgent):
 - Or: the app starts but Hibernate logs old SQL (e.g. `insert into "user" (..., username) values ...`) → the running JAR is stale
 
 **Cause** (why this happens):
-1. You edited `V1.0.0__init_schema.sql` (or Java code in `src/main/java/`)
+1. You edited `V1.0.0__init_schema.sql` / `V1.1.0__oauth_google.sql` (or Java code in `src/main/java/`)
 2. You ran `docker compose up -d`
 3. Docker reused the **cached image** (old JAR) — `docker compose up -d` does **NOT** rebuild by default
 4. On the next restart, the new JAR + new migration collide with the existing `postgres-data` volume: either the old JAR responds with a stale JWT secret / token-version → 401, or the new JAR fails Flyway validation → refuses to start

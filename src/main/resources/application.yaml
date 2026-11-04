@@ -56,6 +56,18 @@ app:
       max-per-ip: 20
       window-ms: 900000
 
+  oauth:
+    google:
+      # Client ID publico del proyecto en Google Cloud Console. No es secreto: el
+      # frontend lo usa para pedir el ID token y el backend lo valida como "aud".
+      client-id: ${GOOGLE_CLIENT_ID:}
+      # JWKS publico de Google. Nimbus lo cachea; no hay llamada de red por request.
+      jwk-set-uri: https://www.googleapis.com/oauth2/v3/certs
+    onboarding:
+      # Vida del token intermedio entre el login con Google y el formulario de
+      # completar perfil (RUN/region/comuna).
+      ttl-ms: 600000
+
   r2:
     account-id: ${R2_ACCOUNT_ID:}
     access-key-id: ${R2_ACCESS_KEY_ID:}

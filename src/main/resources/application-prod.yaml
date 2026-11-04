@@ -13,6 +13,11 @@ app:
   jwt:
     secret: ${APP_JWT_SECRET}
     expiration: ${APP_JWT_EXPIRATION}
+  oauth:
+    google:
+      # Sin default por la misma razon que el JWT: un deploy sin esta variable
+      # tiene que fallar al arrancar, no aceptar/rechazar logins en silencio.
+      client-id: ${GOOGLE_CLIENT_ID}
   cors:
     # Sin default a proposito: el perfil base declara localhost, asi que omitir
     # esta variable en produccion dejaria al backend aceptando solo el origen

@@ -18,6 +18,12 @@ public class UserDetailsServiceImpl implements UserDetailsService {
     public UserDetails loadUserByUsername(@NonNull String email) throws UsernameNotFoundException {
         var user = userRepository.findByEmailAndDeletedAtIsNull(email)
                 .orElseThrow(() -> new UsernameNotFoundException("User not found"));
+        // Cuenta creada con Google: no hay password local que comparar. Sin este
+        // guardia, User.withUsername(...).password(null) lanza IllegalArgumentException
+        // y el login responde 500 en vez de 401.
+        if (user.getPassword() == null) {
+            throw new UsernameNotFoundException("User has no local password");
+        }
         return User.withUsername(user.getEmail())
                 .password(user.getPassword())
                 .roles(user.getRole().name())

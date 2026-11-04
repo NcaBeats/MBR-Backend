@@ -2,12 +2,19 @@ package com.app.proyectojuegosmonolito.account.user.service;
 
 import com.app.proyectojuegosmonolito.TokenVersionCache;
 import com.app.proyectojuegosmonolito.account.profile.model.Profile;
+import com.app.proyectojuegosmonolito.account.profile.model.Visibility;
+import com.app.proyectojuegosmonolito.account.profile.repository.ComunaRepository;
 import com.app.proyectojuegosmonolito.account.user.dto.AdminUserUpdateRequest;
+import com.app.proyectojuegosmonolito.account.user.model.GoogleIdentity;
+import com.app.proyectojuegosmonolito.account.user.model.GoogleSignup;
+import com.app.proyectojuegosmonolito.account.user.model.OAuthIdentity;
 import com.app.proyectojuegosmonolito.account.user.model.Role;
 import com.app.proyectojuegosmonolito.account.user.model.User;
 import com.app.proyectojuegosmonolito.account.wallet.model.Wallet;
+import com.app.proyectojuegosmonolito.account.user.repository.OAuthIdentityRepository;
 import com.app.proyectojuegosmonolito.account.user.repository.UserRepository;
 import com.app.proyectojuegosmonolito.exception.BusinessException;
+import jakarta.persistence.EntityNotFoundException;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.security.crypto.password.PasswordEncoder;
@@ -25,8 +32,14 @@ import com.app.proyectojuegosmonolito.common.RepositoryUtils;
 @Service
 @RequiredArgsConstructor
 public class UserService {
+
+    /** Valor de {@code oauth_identity.provider} para Google Sign-In. */
+    public static final String PROVIDER_GOOGLE = "google";
+
     private final PasswordEncoder passwordEncoder;
     private final UserRepository userRepository;
+    private final OAuthIdentityRepository oauthIdentityRepository;
+    private final ComunaRepository comunaRepository;
     private final TokenVersionCache tokenVersionCache;
 
     @Transactional
@@ -52,10 +65,104 @@ public class UserService {
         if (user.getRole() == null) {
             user.setRole(Role.CLIENTE);
         }
-        user.setPassword(passwordEncoder.encode(user.getPassword()));
+        // Una cuenta creada con Google no tiene password local: se guarda NULL y
+        // UserDetailsServiceImpl rechaza el login por password.
+        if (user.getPassword() != null) {
+            user.setPassword(passwordEncoder.encode(user.getPassword()));
+        }
         var saved = userRepository.save(user);
         log.info("Created user: {} (id={})", saved.getEmail(), saved.getId());
         return saved;
+    }
+
+    /**
+     * Alta de una cuenta creada con Google: misma ruta que {@link #create} para no
+     * duplicar reglas (wallet, rol, createdAt), pero el perfil se arma aca porque
+     * los datos de Google (nombres) vienen del ID token y no de un DTO HTTP.
+     */
+    @Transactional
+    public User createFromGoogle(GoogleSignup signup) {
+        var identity = signup.identity();
+        var comuna = comunaRepository.findById(signup.comunaId())
+                .orElseThrow(() -> new EntityNotFoundException("Comuna not found: " + signup.comunaId()));
+
+        var user = User.builder()
+                .email(identity.email())
+                .password(null)
+                .build();
+        var profile = Profile.builder()
+                .user(user)
+                .nickname(signup.nickname())
+                .avatarImage(avatarUrl(identity.picture()))
+                .run(signup.run())
+                .firstName(truncate(defaultIfBlank(identity.firstName(), signup.nickname()), 50))
+                .lastName(truncate(defaultIfBlank(identity.lastName(), "-"), 100))
+                .birthDate(signup.birthDate())
+                .region(comuna.getRegion())
+                .comuna(comuna)
+                .address(signup.address())
+                .visibility(Visibility.PUBLIC)
+                .build();
+
+        var saved = create(user, profile);
+        ensureGoogleIdentity(saved, identity);
+        log.info("Created user from Google: {} (id={})", saved.getEmail(), saved.getId());
+        return saved;
+    }
+
+    /**
+     * Crea el vinculo con Google o refresca el email de auditoria. Idempotente: si
+     * dos logins concurrentes del mismo usuario llegan a la vez, el UNIQUE de
+     * (provider, provider_user_id) corta al segundo y el llamador puede reintentar.
+     */
+    @Transactional
+    public void ensureGoogleIdentity(User user, GoogleIdentity identity) {
+        var existing = oauthIdentityRepository
+                .findByProviderAndProviderUserId(PROVIDER_GOOGLE, identity.subject());
+        if (existing.isPresent()) {
+            var link = existing.get();
+            if (!link.getUser().getId().equals(user.getId())) {
+                throw new BusinessException(BusinessException.OAUTH_ACCOUNT_CONFLICT,
+                        "This Google account is already linked to another user.");
+            }
+            link.setEmailAtProvider(identity.email());
+            return;
+        }
+        oauthIdentityRepository.save(OAuthIdentity.builder()
+                .user(user)
+                .provider(PROVIDER_GOOGLE)
+                .providerUserId(identity.subject())
+                .emailAtProvider(identity.email())
+                .linkedAt(Instant.now())
+                .build());
+    }
+
+    public Optional<User> findByGoogleSubject(String subject) {
+        return oauthIdentityRepository
+                .findByProviderAndProviderUserId(PROVIDER_GOOGLE, subject)
+                .map(OAuthIdentity::getUser)
+                .filter(user -> user.getDeletedAt() == null);
+    }
+
+    /**
+     * Refresca la foto de perfil con la que devuelve Google. Se llama en cada
+     * login: la URL cambia cuando el usuario cambia su foto. Solo acepta https
+     * (el claim viene firmado, pero no queremos guardar cualquier esquema).
+     */
+    @Transactional
+    public void updateOAuthAvatar(Long userId, String picture) {
+        var avatar = avatarUrl(picture);
+        if (avatar == null) {
+            return;
+        }
+        var user = userRepository.findById(userId).orElse(null);
+        if (user == null || user.getProfile() == null) {
+            return;
+        }
+        if (!avatar.equals(user.getProfile().getAvatarImage())) {
+            user.getProfile().setAvatarImage(avatar);
+            log.info("Updated OAuth avatar for user {}", userId);
+        }
     }
 
     public User findById(Long id) {
@@ -71,6 +178,15 @@ public class UserService {
     public Optional<User> findOptionalByEmail(String email) {
         log.info("Fetching optional user by email: {}", email);
         return userRepository.findByEmail(email);
+    }
+
+    /**
+     * Igual que {@link #findOptionalByEmail} pero excluye las cuentas soft-deleted:
+     * un login con Google no debe resucitar una cuenta borrada.
+     */
+    public Optional<User> findActiveOptionalByEmail(String email) {
+        log.info("Fetching optional active user by email: {}", email);
+        return userRepository.findByEmailAndDeletedAtIsNull(email);
     }
 
     public Page<User> findAll(Pageable pageable) {
@@ -154,5 +270,26 @@ public class UserService {
         userRepository.save(user);
         incrementTokenVersion(user);
         log.info("Soft-deleted user {}", id);
+    }
+
+    private static String defaultIfBlank(String value, String fallback) {
+        return value == null || value.isBlank() ? fallback : value;
+    }
+
+    /** La columna es TEXT, pero no queremos guardar URLs basura ni esquemas raros. */
+    private static String avatarUrl(String picture) {
+        if (picture == null) {
+            return null;
+        }
+        var trimmed = picture.trim();
+        return trimmed.startsWith("https://") && trimmed.length() <= 500 ? trimmed : null;
+    }
+
+    /**
+     * Google no garantiza largos: un `given_name` de 60 caracteres romperia el
+     * @Size(50) de Profile al persistir. Se recorta en vez de devolver un 500.
+     */
+    private static String truncate(String value, int max) {
+        return value.length() <= max ? value : value.substring(0, max);
     }
 }

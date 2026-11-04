@@ -3,6 +3,21 @@ app:
     secret: ${APP_JWT_SECRET:test-secret-0123456789abcdefghijklmnopqrstuvwxyz}
     expiration: ${APP_JWT_EXPIRATION:3600000}
 
+  oauth:
+    google:
+      client-id: ${GOOGLE_CLIENT_ID:test-client-id.apps.googleusercontent.com}
+    onboarding:
+      ttl-ms: 600000
+
+spring:
+  sql:
+    init:
+      # Region/Comuna son tablas con FK desde Profile; los tests no corren
+      # DataInitializer (app.seed.enabled=false), así que sin este seed cualquier
+      # userService.create(...) viola la FK de profile.
+      mode: always
+      data-locations: classpath:test-data.sql
+
   # Valores ficticios: los tests construyen R2StorageService pero nunca llaman a
   # R2 de verdad (video y presign no requieren red; los uploads se mockean).
   r2:
